@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weekday Scheduling Tracker</title>
+  <!-- Google Font: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- CSS Styles -->
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- React & Babel Standalone CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // --- UTILITIES & HELPERS ---
+
+    // Get current local date in YYYY-MM-DD format
+    function getTodayString() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // Format ISO string to readable localized date-time
+    function formatDateTime(isoString) {
+      if (!isoString) return '';
+      const d = new Date(isoString);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Standard list of Status Options
+    const STATUS_OPTIONS = [
+      'New', 'WA Sent', 'Email Sent', 'Called', 'Pending', 'Scheduled', 
+      'Rescheduled-P1', 'Blocked-No Slots', 'Blocked-Broken Link', 
+      'Unreachable-24hr', 'Unreachable-48hr', 'Escalate', 
+      'Disputed Consent', 'Declined', 'Company Cancelled'
+    ];
+
+    // Priority Auto-Assignment Logic based on status
+    function getAutoPriority(status) {
+      if (['Rescheduled-P1', 'Blocked-Broken Link', 'Escalate'].includes(status)) {
+        return 'P1';
+      }
+      if (['Unreachable-24hr', 'Pending'].includes(status)) {
+        return 'P2';
+      }
+      if (['Declined', 'Unreachable-48hr', 'Company Cancelled'].includes(status)) {
+        return 'P4';
+      }
+      return 'P3'; // Standard priority
+    }
+
+    // Seeding mock cases if localStorage is empty
+    const MOCK_CASES = [
+      {
+        id: 'mock-1',
+        candidateName: 'Amit Sharma',
+        companyName: 'Google',
+        calendlyLink: 'https://calendly.com/amit-sharma-google',
+        owner: 'Ram',
+        dateAdded: '2026-06-08',
+        priority: 'P1',
+        status: 'Escalate',
+        attempts: [],
+        interviewDate: '',
+        notes: 'Interviewer notified emergency conflict. Candidate requires urgent rescheduling.',
+        history: [
+          { timestamp: new Date('2026-06-08T09:00:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
+          { timestamp: new Date('2026-06-08T10:15:00').toISOString(), text: 'Escalated: status updated to Escalate, priority set to P1.' }
+        ]
+      },
+      {
+        id: 'mock-2',
+        candidateName: 'Priya Patel',
+        companyName: 'Microsoft',
+        calendlyLink: 'https://calendly.com/priya-patel-msft',
+        owner: 'Shyam',
+        dateAdded: '2026-06-08',
+        priority: 'P1',
+        status: 'Blocked-Broken Link',
+        attempts: [
+          { channel: 'WhatsApp', timestamp: new Date('2026-06-08T09:30:00').toISOString() }
+        ],
+        interviewDate: '',
+        notes: 'Calendly link returns 404 page. Messaged candidate to send a fresh link.',
+        history: [
+          { timestamp: new Date('2026-06-08T09:05:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
+          { timestamp: new Date('2026-06-08T09:30:00').toISOString(), text: 'Logged Attempt 1 (WhatsApp). Status synced to WA Sent.' },
+          { timestamp: new Date('2026-06-08T11:00:00').toISOString(), text: 'Status updated to Blocked-Broken Link. Auto-assigned priority P1.' }
+        ]
+      },
+      {
+        id: 'mock-3',
+        candidateName: 'Rohan Gupta',
+        companyName: 'Stripe',
+        calendlyLink: 'https://calendly.com/rohan-gupta-stripe',
+        owner: 'Ram',
+        dateAdded: '2026-06-07',
+        priority: 'P2',
+        status: 'Unreachable-24hr',
+        attempts: [
+          { channel: 'Call', timestamp: new Date('2026-06-07T11:00:00').toISOString() },
+          { timestamp: new Date('2026-06-07T16:00:00').toISOString(), channel: 'WhatsApp' }
+        ],
+        interviewDate: '',
+        notes: 'No response to calls or WA messages for over 24 hours.',
+        history: [
+          { timestamp: new Date('2026-06-07T10:00:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
+          { timestamp: new Date('2026-06-07T11:00:00').toISOString(), text: 'Logged Attempt 1 (Call). Status synced to Called.' },
+          { timestamp: new Date('2026-06-07T16:00:00').toISOString(), text: 'Logged Attempt 2 (WhatsApp). Status synced to WA Sent.' },
+          { timestamp: new Date('2026-06-08T10:00:00').toISOString(), text: 'Marked Unreachable (24hr). Status set to Unreachable-24hr, priority auto-assigned to P2.' }
+        ]
+      },
+      {
+        id: 'mock-4',
+        candidateName: 'Sneha Iyer',
+        companyName: 'Meta',
+        calendlyLink: 'https://calendly.com/sneha-iyer-meta',
+        owner: 'Shyam',
+        dateAdded: '2026-06-08',
+        priority: 'P3',
+        status: 'WA Sent',
+        attempts: [
+          { channel: 'WhatsApp', timestamp: new Date('2026-06-08T10:30:00').toISOString() }
+        ],
+        interviewDate: '',
+        notes: 'WhatsApp message read receipt visible. Waiting for response.',
+        history: [
+          { timestamp: new Date('2026-06-08T10:10:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
+          { timestamp: new Date('2026-06-08T10:30:00').toISOString(), text: 'Logged Attempt 1 (WhatsApp). Status synced to WA Sent.' }
+        ]
+      },
+      {
+        id: 'mock-5',
+        candidateName: 'Vijay Kumar',
+        companyName: 'Amazon',
+        calendlyLink: 'https://calendly.com/vijay-kumar-amzn',
+        owner: 'Ram',
+        dateAdded: '2026-06-08',
+        priority: 'P3',
+        status: 'Scheduled',
+        attempts: [
+          { channel: 'Email', timestamp: new Date('2026-06-08T09:15:00').toISOString() }
+        ],
+        interviewDate: '2026-06-12',
+        notes: 'Interview locked in for June 12th.',
+        history: [
+          { timestamp: new Date('2026-06-08T09:12:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
+          { timestamp: new Date('2026-06-08T09:15:00').toISOString(), text: 'Logged Attempt 1 (Email). Status synced to Email Sent.' },
+          { timestamp: new Date('2026-06-08T10:45:00').toISOString(), text: 'Marked Scheduled for 2026-06-12. Status set to Scheduled.' }
+        ]
+      },
+      {
+        id: 'mock-6',
+        candidateName: 'Rahul Verma',
+        companyName: 'Netflix',
+        calendlyLink: 'https://calendly.com/rahul-verma-nflx',
+        owner: 'Shyam',
+        dateAdded: '2026-06-07',
+        priority: 'P4',
+        status: 'Declined',
+        attempts: [
+          { channel: 'Call', timestamp: new Date('2026-06-07T14:00:00').toISOString() }
+        ],
+        interviewDate: '',
+        notes: 'Candidate has accepted another offer elsewhere and declined consent to continue.',
+        history: [
+          { timestamp: new Date('2026-06-07T13:45:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
+          { timestamp: new Date('2026-06-07T14:00:00').toISOString(), text: 'Logged Attempt 1 (Call). Status synced to Called.' },
+          { timestamp: new Date('2026-06-07T17:30:00').toISOString(), text: 'Marked Declined. Status set to Declined, priority auto-assigned to P4.' }
+        ]
+      }
+    ];
+
+
+    // --- COMPONENTS ---
+
+    // 1. KPI Bar
+    function KPIBar({ cases }) {
+      const today = getTodayString();
+      
+      const casesToday = useMemo(() => {
+        return cases.filter(c => c.dateAdded === today);
+      }, [cases, today]);
+
+      const totalToday = casesToday.length;
+
+      const scheduledToday = useMemo(() => {
+        return casesToday.filter(c => c.status === 'Scheduled').length;
+      }, [casesToday]);
+
+      const schedulingRate = totalToday > 0 
+        ? Math.round((scheduledToday / totalToday) * 100) 
+        : null;
+
+      const p1AlertsCount = useMemo(() => {
+        // Active P1 cases (non-terminal states)
+        const terminalStates = ['Declined', 'Unreachable-48hr', 'Company Cancelled'];
+        return cases.filter(c => c.priority === 'P1' && !terminalStates.includes(c.status)).length;
+      }, [cases]);
+
+      const showWarning = schedulingRate !== null && schedulingRate < 80;
+
+      return (
+        <div className="kpi-container">
+          <div className="kpi-grid">
+            <div className="kpi-card">
+              <span className="kpi-title">Today's Scheduling Rate</span>
+              <span className="kpi-value">
+                {schedulingRate !== null ? `${schedulingRate}%` : 'N/A'}
+              </span>
+              <span className="kpi-subtext">
+                {schedulingRate !== null ? `${scheduledToday} of ${totalToday} cases scheduled` : 'No cases added today'}
+              </span>
+            </div>
+
+            <div className="kpi-card">
+              <span className="kpi-title">Cases Added Today</span>
+              <span className="kpi-value">{totalToday}</span>
+              <span className="kpi-subtext">Assigned 50/50 to Ram & Shyam</span>
+            </div>
+
+            <div className={`kpi-card ${p1AlertsCount > 0 ? 'alert' : ''}`}>
+              <span className="kpi-title">Active P1 Alerts</span>
+              <span className="kpi-value">{p1AlertsCount}</span>
+              <span className="kpi-subtext">Requires immediate action</span>
+            </div>
+          </div>
+
+          {showWarning && (
+            <div className="warning-banner">
+              <strong>⚠️ Warning:</strong> Today's scheduling rate has dropped below 80% ({schedulingRate}%). Please follow up on pending cases immediately.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 2. Add Case Form
+    function AddCaseForm({ onAddCase, cases }) {
+      const [candidateName, setCandidateName] = useState('');
+      const [companyName, setCompanyName] = useState('');
+      const [calendlyLink, setCalendlyLink] = useState('');
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!candidateName.trim() || !companyName.trim() || !calendlyLink.trim()) {
+          alert('Please fill out all fields.');
+          return;
+        }
+
+        // Determine owner based on auto-split logic for cases created today
+        const today = getTodayString();
+        const casesAddedToday = cases.filter(c => c.dateAdded === today);
+        const countToday = casesAddedToday.length;
+        
+        // Even count (0, 2, 4...) -> Ram, Odd count (1, 3, 5...) -> Shyam
+        const assignedOwner = countToday % 2 === 0 ? 'Ram' : 'Shyam';
+
+        const newCase = {
+          id: 'case-' + Date.now(),
+          candidateName: candidateName.trim(),
+          companyName: companyName.trim(),
+          calendlyLink: calendlyLink.trim(),
+          owner: assignedOwner,
+          dateAdded: today,
+          priority: 'P3', // Default priority
+          status: 'New',   // Default status
+          attempts: [],
+          interviewDate: '',
+          notes: '',
+          history: [
+            { 
+              timestamp: new Date().toISOString(), 
+              text: `Case created. Auto-assigned to ${assignedOwner} (split index: ${countToday + 1}).` 
+            }
+          ]
+        };
+
+        onAddCase(newCase);
+        
+        // Reset form
+        setCandidateName('');
+        setCompanyName('');
+        setCalendlyLink('');
+      };
+
+      return (
+        <div className="form-card">
+          <div className="form-title">Add New Scheduling Case</div>
+          <form className="add-case-form" onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="cand-name">Candidate Name</label>
+              <input
+                id="cand-name"
+                type="text"
+                placeholder="e.g. John Doe"
+                value={candidateName}
+                onChange={e => setCandidateName(e.target.value)}
+                required
+              />
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="comp-name">Company Name</label>
+              <input
+                id="comp-name"
+                type="text"
+                placeholder="e.g. Acme Corp"
+                value={companyName}
+                onChange={e => setCompanyName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="calendly-url">Calendly Link</label>
+              <input
+                id="calendly-url"
+                type="url"
+                placeholder="https://calendly.com/..."
+                value={calendlyLink}
+                onChange={e => setCalendlyLink(e.target.value)}
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn">
+              Add Case
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    // Helper to get priority weight for sorting (P1 has highest weight)
+    const getPriorityWeight = (priority) => {
+      switch (priority) {
+        case 'P1': return 4;
+        case 'P2': return 3;
+        case 'P3': return 2;
+        case 'P4': return 1;
+        default: return 0;
+      }
+    };
+
+    // Helper to sort cases: Priority desc, Date Added asc
+    const sortCases = (a, b) => {
+      const weightA = getPriorityWeight(a.priority);
+      const weightB = getPriorityWeight(b.priority);
+      
+      if (weightA !== weightB) {
+        return weightB - weightA; // Descending priority
+      }
+      
+      // Ascending Date Added
+      return new Date(a.dateAdded) - new Date(b.dateAdded);
+    };
+
+    // 3. Dashboard Column
+    function DashboardColumn({ title, cases, onSelectCase }) {
+      return (
+        <div className="dashboard-column">
+          <div className="column-header">
+            <span className="column-title">
+              {title}'s Queue
+            </span>
+            <span className="case-count-badge">{cases.length} cases</span>
+          </div>
+
+          <div className="queue-list">
+            {cases.length === 0 ? (
+              <div className="empty-state">
+                <span>No active cases in queue</span>
+              </div>
+            ) : (
+              cases.map(item => {
+                const priorityClass = `priority-${item.priority.toLowerCase()}`;
+                return (
+                  <div 
+                    key={item.id} 
+                    className={`case-card ${priorityClass}`}
+                    onClick={() => onSelectCase(item)}
+                  >
+                    <div className="case-card-header">
+                      <span className="candidate-name">{item.candidateName}</span>
+                      <span className={`badge badge-${item.priority.toLowerCase()}`}>{item.priority}</span>
+                    </div>
+
+                    <div className="case-card-body">
+                      <div><strong>Company:</strong> {item.companyName}</div>
+                      <div><strong>Added:</strong> {item.dateAdded}</div>
+                    </div>
+
+                    <div className="case-card-footer">
+                      <span className="badge badge-status">{item.status}</span>
+                      <div className="attempts-indicator" title={`${item.attempts.length} of 3 attempts logged`}>
+                        <div className={`attempt-dot ${item.attempts.length >= 1 ? 'logged' : ''}`}></div>
+                        <div className={`attempt-dot ${item.attempts.length >= 2 ? 'logged' : ''}`}></div>
+                        <div className={`attempt-dot ${item.attempts.length >= 3 ? 'logged' : ''}`}></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // 4. Dashboard View
+    function Dashboard({ cases, onSelectCase }) {
+      const ramCases = useMemo(() => {
+        return cases.filter(c => c.owner === 'Ram').sort(sortCases);
+      }, [cases]);
+
+      const shyamCases = useMemo(() => {
+        return cases.filter(c => c.owner === 'Shyam').sort(sortCases);
+      }, [cases]);
+
+      return (
+        <div className="dashboard-grid">
+          <DashboardColumn 
+            title="Ram" 
+            cases={ramCases} 
+            onSelectCase={onSelectCase} 
+          />
+          <DashboardColumn 
+            title="Shyam" 
+            cases={shyamCases} 
+            onSelectCase={onSelectCase} 
+          />
+        </div>
+      );
+    }
+
+    // 5. Full Case List Table
+    function CaseListTable({ cases, onSelectCase }) {
+      const [filterOwner, setFilterOwner] = useState('All');
+      const [filterStatus, setFilterStatus] = useState('All');
+      const [filterPriority, setFilterPriority] = useState('All');
+      const [filterDateRange, setFilterDateRange] = useState('All');
+
+      const filteredCases = useMemo(() => {
+        return cases.filter(c => {
+          const matchOwner = filterOwner === 'All' || c.owner === filterOwner;
+          const matchStatus = filterStatus === 'All' || c.status === filterStatus;
+          const matchPriority = filterPriority === 'All' || c.priority === filterPriority;
+          
+          let matchDate = true;
+          if (filterDateRange !== 'All') {
+            const todayStr = getTodayString();
+            if (filterDateRange === 'Today') {
+              matchDate = c.dateAdded === todayStr;
+            } else if (filterDateRange === 'Yesterday') {
+              const yes = new Date();
+              yes.setDate(yes.getDate() - 1);
+              const yesStr = yes.toISOString().split('T')[0];
+              matchDate = c.dateAdded === yesStr;
+            } else if (filterDateRange === 'Last 7 Days') {
+              const cutoff = new Date();
+              cutoff.setDate(cutoff.getDate() - 7);
+              matchDate = new Date(c.dateAdded) >= cutoff;
+            }
+          }
+          
+          return matchOwner && matchStatus && matchPriority && matchDate;
+        }).sort(sortCases);
+      }, [cases, filterOwner, filterStatus, filterPriority, filterDateRange]);
+
+      return (
+        <div>
+          <div className="table-filters">
+            <div className="form-group">
+              <label>Filter by Owner</label>
+              <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
+                <option value="All">All Owners</option>
+                <option value="Ram">Ram</option>
+                <option value="Shyam">Shyam</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Filter by Status</label>
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                <option value="All">All Statuses</option>
+                {STATUS_OPTIONS.map(opt => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Filter by Priority</label>
+              <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+                <option value="All">All Priorities</option>
+                <option value="P1">P1</option>
+                <option value="P2">P2</option>
+                <option value="P3">P3</option>
+                <option value="P4">P4</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Filter by Date Added</label>
+              <select value={filterDateRange} onChange={e => setFilterDateRange(e.target.value)}>
+                <option value="All">All Time</option>
+                <option value="Today">Today</option>
+                <option value="Yesterday">Yesterday</option>
+                <option value="Last 7 Days">Last 7 Days</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Candidate</th>
+                  <th>Company</th>
+                  <th>Calendly Link</th>
+                  <th>Owner</th>
+                  <th>Date Added</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Attempts</th>
+                  <th>Interview Date</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCases.length === 0 ? (
+                  <tr>
+                    <td colSpan="10" style={{ textAlign: 'center', padding: '2rem' }}>
+                      No cases matching the filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCases.map(item => {
+                    const rowClass = `priority-${item.priority.toLowerCase()} clickable-row`;
+                    const latestAttempt = item.attempts.length > 0 
+                      ? `${item.attempts[item.attempts.length - 1].channel} (${formatDateTime(item.attempts[item.attempts.length - 1].timestamp)})`
+                      : 'None';
+                    return (
+                      <tr 
+                        key={item.id} 
+                        className={rowClass}
+                        onClick={() => onSelectCase(item)}
+                      >
+                        <td className="text-semibold">{item.candidateName}</td>
+                        <td>{item.companyName}</td>
+                        <td>
+                          <a 
+                            href={item.calendlyLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="calendly-link"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            Link
+                          </a>
+                        </td>
+                        <td>{item.owner}</td>
+                        <td>{item.dateAdded}</td>
+                        <td>
+                          <span className={`badge badge-${item.priority.toLowerCase()}`}>{item.priority}</span>
+                        </td>
+                        <td>
+                          <span className="badge badge-status">{item.status}</span>
+                        </td>
+                        <td className="text-xs">{latestAttempt}</td>
+                        <td>{item.interviewDate || 'Not Scheduled'}</td>
+                        <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.notes}>
+                          {item.notes || '-'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // 6. Case Detail Modal Component
+    function CaseDetailModal({ caseItem, onClose, onUpdateCase }) {
+      const [owner, setOwner] = useState(caseItem.owner);
+      const [status, setStatus] = useState(caseItem.status);
+      const [priority, setPriority] = useState(caseItem.priority);
+      const [calendlyLink, setCalendlyLink] = useState(caseItem.calendlyLink);
+      const [notes, setNotes] = useState(caseItem.notes || '');
+
+      const [showSchedulePrompt, setShowSchedulePrompt] = useState(false);
+      const [scheduleDate, setScheduleDate] = useState('');
+
+      const [showReschedulePrompt, setShowReschedulePrompt] = useState(false);
+      const [rescheduleNotes, setRescheduleNotes] = useState('');
+
+      const [showAttemptLogger, setShowAttemptLogger] = useState(false);
+
+      // Keep component state in sync if parent updates the active case item
+      useEffect(() => {
+        setOwner(caseItem.owner);
+        setStatus(caseItem.status);
+        setPriority(caseItem.priority);
+        setCalendlyLink(caseItem.calendlyLink);
+        setNotes(caseItem.notes || '');
+        setShowSchedulePrompt(false);
+        setShowReschedulePrompt(false);
+        setShowAttemptLogger(false);
+      }, [caseItem]);
+
+      // Handle standard updates (fields override)
+      const handleSaveOverrides = () => {
+        const historyEntries = [];
+        if (owner !== caseItem.owner) {
+          historyEntries.push(`Owner manually updated from ${caseItem.owner} to ${owner}.`);
+        }
+        if (status !== caseItem.status) {
+          historyEntries.push(`Status manually updated from ${caseItem.status} to ${status}.`);
+        }
+        if (priority !== caseItem.priority) {
+          historyEntries.push(`Priority manually updated from ${caseItem.priority} to ${priority} (Override).`);
+        }
+        if (calendlyLink !== caseItem.calendlyLink) {
+          historyEntries.push(`Calendly Link updated.`);
+        }
+        if (notes !== caseItem.notes) {
+          historyEntries.push(`Notes updated.`);
+        }
+
+        if (historyEntries.length === 0) return;
+
+        const updatedHistory = [
+          ...caseItem.history,
+          ...historyEntries.map(entry => ({
+            timestamp: new Date().toISOString(),
+            text: entry
+          }))
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          owner,
+          status,
+          priority,
+          calendlyLink,
+          notes,
+          history: updatedHistory
+        });
+      };
+
+      // Action: Log Attempt
+      const handleLogAttempt = (channel) => {
+        if (caseItem.attempts.length >= 3) {
+          alert('Maximum 3 attempts have already been logged for this case.');
+          return;
+        }
+
+        const timestamp = new Date().toISOString();
+        const newAttempt = { channel, timestamp };
+        const updatedAttempts = [...caseItem.attempts, newAttempt];
+        
+        // Auto status mapping based on channel
+        let nextStatus = caseItem.status;
+        if (channel === 'WhatsApp' || channel === 'Voice Note') {
+          nextStatus = 'WA Sent';
+        } else if (channel === 'Email') {
+          nextStatus = 'Email Sent';
+        } else if (channel === 'Call') {
+          nextStatus = 'Called';
+        } else if (channel === 'SMS') {
+          nextStatus = 'Pending';
+        }
+
+        const autoPriority = getAutoPriority(nextStatus);
+        
+        const logText = `Logged Attempt ${updatedAttempts.length} (${channel}). Status synced to ${nextStatus}.`;
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          attempts: updatedAttempts,
+          status: nextStatus,
+          priority: autoPriority,
+          history: updatedHistory
+        });
+        
+        setShowAttemptLogger(false);
+      };
+
+      // Action: Mark Scheduled
+      const handleMarkScheduledSubmit = (e) => {
+        e.preventDefault();
+        if (!scheduleDate) {
+          alert('Please pick an interview date.');
+          return;
+        }
+
+        const timestamp = new Date().toISOString();
+        const logText = `Marked Scheduled for ${scheduleDate}. Status updated to Scheduled.`;
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          status: 'Scheduled',
+          priority: getAutoPriority('Scheduled'),
+          interviewDate: scheduleDate,
+          history: updatedHistory
+        });
+
+        setShowSchedulePrompt(false);
+        setScheduleDate('');
+      };
+
+      // Action: Escalate
+      const handleEscalate = () => {
+        const timestamp = new Date().toISOString();
+        const logText = `Escalated case. Status set to Escalate, Priority escalated to P1.`;
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          status: 'Escalate',
+          priority: 'P1',
+          history: updatedHistory
+        });
+      };
+
+      // Action: Reschedule
+      const handleRescheduleSubmit = (e) => {
+        e.preventDefault();
+        
+        const timestamp = new Date().toISOString();
+        const oldDate = caseItem.interviewDate || 'Unknown Date';
+        const reasonStr = rescheduleNotes.trim() ? ` (Reason: ${rescheduleNotes.trim()})` : '';
+        const logText = `Initiated rescheduling. Status reset to Rescheduled-P1, Priority set to P1. Old interview date: ${oldDate}${reasonStr}`;
+        
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        // Also append to case notes
+        const updatedNotes = (notes ? notes + '\n' : '') + `[Reschedule Log] Old interview was: ${oldDate}.${reasonStr}`;
+
+        onUpdateCase({
+          ...caseItem,
+          status: 'Rescheduled-P1',
+          priority: 'P1',
+          interviewDate: '', // Clear active interview date
+          notes: updatedNotes,
+          history: updatedHistory
+        });
+
+        setShowReschedulePrompt(false);
+        setRescheduleNotes('');
+      };
+
+      // Action: Mark Declined
+      const handleMarkDeclined = () => {
+        const timestamp = new Date().toISOString();
+        const logText = `Marked Declined. Status set to Declined, Priority set to P4 (Terminal).`;
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          status: 'Declined',
+          priority: 'P4',
+          history: updatedHistory
+        });
+      };
+
+      // Action: Mark Unreachable
+      const handleMarkUnreachable = () => {
+        const timestamp = new Date().toISOString();
+        let nextStatus = 'Unreachable-24hr';
+        let nextPriority = 'P2';
+
+        if (caseItem.status === 'Unreachable-24hr' || caseItem.attempts.length >= 3) {
+          nextStatus = 'Unreachable-48hr';
+          nextPriority = 'P4';
+        }
+
+        const logText = `Marked Unreachable. Status set to ${nextStatus}, Priority set to ${nextPriority}.`;
+        const updatedHistory = [
+          ...caseItem.history,
+          { timestamp, text: logText }
+        ];
+
+        onUpdateCase({
+          ...caseItem,
+          status: nextStatus,
+          priority: nextPriority,
+          history: updatedHistory
+        });
+      };
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            
+            <div className="modal-header">
+              <div className="modal-header-title">
+                <h2>{caseItem.candidateName}</h2>
+                <p>{caseItem.companyName} &bull; Added on {caseItem.dateAdded}</p>
+              </div>
+              <button className="close-btn" onClick={onClose}>&times;</button>
+            </div>
+
+            <div className="modal-body">
+              {/* Left Column: Form Info */}
+              <div className="modal-info-col">
+                <div className="modal-section-title">Case Information</div>
+                
+                <div className="info-grid">
+                  <div className="form-group">
+                    <label>Owner</label>
+                    <select value={owner} onChange={e => setOwner(e.target.value)}>
+                      <option value="Ram">Ram</option>
+                      <option value="Shyam">Shyam</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Status</label>
+                    <select value={status} onChange={e => setStatus(e.target.value)}>
+                      {STATUS_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Priority (Manual Override)</label>
+                    <select value={priority} onChange={e => setPriority(e.target.value)}>
+                      <option value="P1">P1 (Immediate Alert)</option>
+                      <option value="P2">P2 (Pending Follow-up)</option>
+                      <option value="P3">P3 (Standard Case)</option>
+                      <option value="P4">P4 (Terminal State)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Calendly Link</label>
+                    <input 
+                      type="url" 
+                      value={calendlyLink} 
+                      onChange={e => setCalendlyLink(e.target.value)} 
+                    />
+                    <a 
+                      href={caseItem.calendlyLink} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="calendly-link text-xs"
+                      style={{ marginTop: '0.25rem', display: 'inline-block' }}
+                    >
+                      Open Calendly In New Tab &rarr;
+                    </a>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Interview Date</label>
+                    <input 
+                      type="text" 
+                      value={caseItem.interviewDate || 'Not Scheduled'} 
+                      disabled 
+                      style={{ backgroundColor: '#f3f4f6', cursor: 'not-allowed' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Internal Notes</label>
+                    <textarea 
+                      rows="3" 
+                      value={notes} 
+                      onChange={e => setNotes(e.target.value)}
+                      placeholder="Add candidate preferences, slot request constraints, etc."
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  className="btn" 
+                  style={{ alignSelf: 'flex-start' }}
+                  onClick={handleSaveOverrides}
+                >
+                  Save Field Changes
+                </button>
+              </div>
+
+              {/* Right Column: Case Actions & Logging */}
+              <div className="modal-actions-col">
+                <div>
+                  <div className="modal-section-title">Log Action / Action Toolbar</div>
+                  
+                  <div className="action-buttons-grid">
+                    <button 
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowAttemptLogger(!showAttemptLogger);
+                        setShowSchedulePrompt(false);
+                        setShowReschedulePrompt(false);
+                      }}
+                      disabled={caseItem.attempts.length >= 3}
+                    >
+                      📞 Log Attempt ({caseItem.attempts.length}/3)
+                    </button>
+
+                    <button 
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowSchedulePrompt(!showSchedulePrompt);
+                        setShowAttemptLogger(false);
+                        setShowReschedulePrompt(false);
+                      }}
+                    >
+                      📅 Mark Scheduled
+                    </button>
+
+                    <button className="btn btn-danger" onClick={handleEscalate}>
+                      🚨 Escalate
+                    </button>
+
+                    <button 
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowReschedulePrompt(!showReschedulePrompt);
+                        setShowAttemptLogger(false);
+                        setShowSchedulePrompt(false);
+                      }}
+                    >
+                      🔄 Reschedule
+                    </button>
+
+                    <button className="btn btn-secondary" onClick={handleMarkDeclined}>
+                      ✖ Mark Declined
+                    </button>
+
+                    <button className="btn btn-secondary" onClick={handleMarkUnreachable}>
+                      ⏳ Mark Unreachable
+                    </button>
+                  </div>
+
+                  {/* 1. Sub-Form: Log Attempt */}
+                  {showAttemptLogger && (
+                    <div className="log-attempt-area">
+                      <span className="text-semibold text-sm">Select Channel Used:</span>
+                      <div className="channel-selector">
+                        {['WhatsApp', 'Email', 'Call', 'SMS', 'Voice Note'].map(ch => (
+                          <button 
+                            key={ch} 
+                            className="channel-btn"
+                            onClick={() => handleLogAttempt(ch)}
+                          >
+                            {ch}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Sub-Form: Mark Scheduled */}
+                  {showSchedulePrompt && (
+                    <form className="modal-prompt-overlay" onSubmit={handleMarkScheduledSubmit}>
+                      <label htmlFor="sched-date">Select Interview Date</label>
+                      <input 
+                        id="sched-date" 
+                        type="date" 
+                        value={scheduleDate} 
+                        onChange={e => setScheduleDate(e.target.value)}
+                        required 
+                      />
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>Confirm</button>
+                        <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => setShowSchedulePrompt(false)}>Cancel</button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* 3. Sub-Form: Reschedule */}
+                  {showReschedulePrompt && (
+                    <form className="modal-prompt-overlay" onSubmit={handleRescheduleSubmit}>
+                      <label htmlFor="resched-notes">Rescheduling Context / Notes</label>
+                      <input 
+                        id="resched-notes" 
+                        type="text" 
+                        placeholder="e.g. Candidate cancelled due to work conflict." 
+                        value={rescheduleNotes}
+                        onChange={e => setRescheduleNotes(e.target.value)}
+                      />
+                      <div className="d-flex gap-2">
+                        <button type="submit" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}>Confirm Reschedule</button>
+                        <button type="button" className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }} onClick={() => setShowReschedulePrompt(false)}>Cancel</button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                {/* Case Action History Log */}
+                <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+                  <div className="modal-section-title">Case Action History</div>
+                  <div className="history-container">
+                    <ul className="history-list">
+                      {caseItem.history.map((log, index) => (
+                        <li key={index} className="history-item">
+                          <span className="history-time">{formatDateTime(log.timestamp)}</span>
+                          <span className="history-desc">{log.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={onClose}>Close Panel</button>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [cases, setCases] = useState([]);
+      const [selectedCase, setSelectedCase] = useState(null);
+
+      // Load data from localStorage on initial render
+      useEffect(() => {
+        const stored = localStorage.getItem('weekday_cases');
+        if (stored) {
+          try {
+            setCases(JSON.parse(stored));
+          } catch (e) {
+            console.error('Failed to parse localStorage data, seeding mock cases', e);
+            setCases(MOCK_CASES);
+            localStorage.setItem('weekday_cases', JSON.stringify(MOCK_CASES));
+          }
+        } else {
+          setCases(MOCK_CASES);
+          localStorage.setItem('weekday_cases', JSON.stringify(MOCK_CASES));
+        }
+      }, []);
+
+      // Helper to update cases state and write to localStorage
+      const updateCasesStateAndStorage = (newCases) => {
+        setCases(newCases);
+        localStorage.setItem('weekday_cases', JSON.stringify(newCases));
+      };
+
+      // Add a new case
+      const handleAddCase = (newCase) => {
+        const updated = [newCase, ...cases];
+        updateCasesStateAndStorage(updated);
+      };
+
+      // Update an existing case
+      const handleUpdateCase = (updatedCase) => {
+        const updated = cases.map(c => c.id === updatedCase.id ? updatedCase : c);
+        updateCasesStateAndStorage(updated);
+        // Also update the active modal case
+        if (selectedCase && selectedCase.id === updatedCase.id) {
+          setSelectedCase(updatedCase);
+        }
+      };
+
+      // Reset application seed data (for testing convenience)
+      const handleResetData = () => {
+        if (confirm('Are you sure you want to reset all scheduling cases to the default mock dataset? This will clear any changes.')) {
+          updateCasesStateAndStorage(MOCK_CASES);
+        }
+      };
+
+      return (
+        <div className="container">
+          <header>
+            <div className="header-top">
+              <div>
+                <h1>Weekday Scheduling Tracker</h1>
+                <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  Scheduling dashboard for interns Ram & Shyam
+                </p>
+              </div>
+              <div className="d-flex gap-2">
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                  onClick={handleResetData}
+                >
+                  🔄 Reset Mock Data
+                </button>
+                <div className="tabs">
+                  <button 
+                    className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('dashboard')}
+                  >
+                    Dashboard
+                  </button>
+                  <button 
+                    className={`tab-btn ${activeTab === 'table' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('table')}
+                  >
+                    Full Case List
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <KPIBar cases={cases} />
+          </header>
+
+          <main>
+            {/* Add Case Form is visible on both views at the top */}
+            <AddCaseForm onAddCase={handleAddCase} cases={cases} />
+
+            {activeTab === 'dashboard' ? (
+              <Dashboard cases={cases} onSelectCase={setSelectedCase} />
+            ) : (
+              <CaseListTable cases={cases} onSelectCase={setSelectedCase} />
+            )}
+          </main>
+
+          {selectedCase && (
+            <CaseDetailModal 
+              caseItem={selectedCase} 
+              onClose={() => setSelectedCase(null)} 
+              onUpdateCase={handleUpdateCase}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // Render the App
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+  </script>
+</body>
+</html>

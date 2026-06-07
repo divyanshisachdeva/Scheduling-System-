@@ -1,0 +1,12 @@
+{
+  "name": "weekday-scheduling-tracker",
+  "version": "1.0.0",
+  "description": "Weekday Scheduling Tracker for interns Ram & Shyam",
+  "main": "index.html",
+  "scripts": {
+    "start": "echo 'No node runner needed. Simply open index.html in your web browser!'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
