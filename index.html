@@ -11,6 +11,9 @@
   <!-- CSS Styles -->
   <link rel="stylesheet" href="styles.css">
   
+  <!-- Google Sheets Mock Data Seed -->
+  <script src="mockData.js"></script>
+  
   <!-- React & Babel Standalone CDNs -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -62,127 +65,8 @@
       return 'P3'; // Standard priority
     }
 
-    // Seeding mock cases if localStorage is empty
-    const MOCK_CASES = [
-      {
-        id: 'mock-1',
-        candidateName: 'Amit Sharma',
-        companyName: 'Google',
-        calendlyLink: 'https://calendly.com/amit-sharma-google',
-        owner: 'Ram',
-        dateAdded: '2026-06-08',
-        priority: 'P1',
-        status: 'Escalate',
-        attempts: [],
-        interviewDate: '',
-        notes: 'Interviewer notified emergency conflict. Candidate requires urgent rescheduling.',
-        history: [
-          { timestamp: new Date('2026-06-08T09:00:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
-          { timestamp: new Date('2026-06-08T10:15:00').toISOString(), text: 'Escalated: status updated to Escalate, priority set to P1.' }
-        ]
-      },
-      {
-        id: 'mock-2',
-        candidateName: 'Priya Patel',
-        companyName: 'Microsoft',
-        calendlyLink: 'https://calendly.com/priya-patel-msft',
-        owner: 'Shyam',
-        dateAdded: '2026-06-08',
-        priority: 'P1',
-        status: 'Blocked-Broken Link',
-        attempts: [
-          { channel: 'WhatsApp', timestamp: new Date('2026-06-08T09:30:00').toISOString() }
-        ],
-        interviewDate: '',
-        notes: 'Calendly link returns 404 page. Messaged candidate to send a fresh link.',
-        history: [
-          { timestamp: new Date('2026-06-08T09:05:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
-          { timestamp: new Date('2026-06-08T09:30:00').toISOString(), text: 'Logged Attempt 1 (WhatsApp). Status synced to WA Sent.' },
-          { timestamp: new Date('2026-06-08T11:00:00').toISOString(), text: 'Status updated to Blocked-Broken Link. Auto-assigned priority P1.' }
-        ]
-      },
-      {
-        id: 'mock-3',
-        candidateName: 'Rohan Gupta',
-        companyName: 'Stripe',
-        calendlyLink: 'https://calendly.com/rohan-gupta-stripe',
-        owner: 'Ram',
-        dateAdded: '2026-06-07',
-        priority: 'P2',
-        status: 'Unreachable-24hr',
-        attempts: [
-          { channel: 'Call', timestamp: new Date('2026-06-07T11:00:00').toISOString() },
-          { timestamp: new Date('2026-06-07T16:00:00').toISOString(), channel: 'WhatsApp' }
-        ],
-        interviewDate: '',
-        notes: 'No response to calls or WA messages for over 24 hours.',
-        history: [
-          { timestamp: new Date('2026-06-07T10:00:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
-          { timestamp: new Date('2026-06-07T11:00:00').toISOString(), text: 'Logged Attempt 1 (Call). Status synced to Called.' },
-          { timestamp: new Date('2026-06-07T16:00:00').toISOString(), text: 'Logged Attempt 2 (WhatsApp). Status synced to WA Sent.' },
-          { timestamp: new Date('2026-06-08T10:00:00').toISOString(), text: 'Marked Unreachable (24hr). Status set to Unreachable-24hr, priority auto-assigned to P2.' }
-        ]
-      },
-      {
-        id: 'mock-4',
-        candidateName: 'Sneha Iyer',
-        companyName: 'Meta',
-        calendlyLink: 'https://calendly.com/sneha-iyer-meta',
-        owner: 'Shyam',
-        dateAdded: '2026-06-08',
-        priority: 'P3',
-        status: 'WA Sent',
-        attempts: [
-          { channel: 'WhatsApp', timestamp: new Date('2026-06-08T10:30:00').toISOString() }
-        ],
-        interviewDate: '',
-        notes: 'WhatsApp message read receipt visible. Waiting for response.',
-        history: [
-          { timestamp: new Date('2026-06-08T10:10:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
-          { timestamp: new Date('2026-06-08T10:30:00').toISOString(), text: 'Logged Attempt 1 (WhatsApp). Status synced to WA Sent.' }
-        ]
-      },
-      {
-        id: 'mock-5',
-        candidateName: 'Vijay Kumar',
-        companyName: 'Amazon',
-        calendlyLink: 'https://calendly.com/vijay-kumar-amzn',
-        owner: 'Ram',
-        dateAdded: '2026-06-08',
-        priority: 'P3',
-        status: 'Scheduled',
-        attempts: [
-          { channel: 'Email', timestamp: new Date('2026-06-08T09:15:00').toISOString() }
-        ],
-        interviewDate: '2026-06-12',
-        notes: 'Interview locked in for June 12th.',
-        history: [
-          { timestamp: new Date('2026-06-08T09:12:00').toISOString(), text: 'Case added. Auto-split assigned to Ram.' },
-          { timestamp: new Date('2026-06-08T09:15:00').toISOString(), text: 'Logged Attempt 1 (Email). Status synced to Email Sent.' },
-          { timestamp: new Date('2026-06-08T10:45:00').toISOString(), text: 'Marked Scheduled for 2026-06-12. Status set to Scheduled.' }
-        ]
-      },
-      {
-        id: 'mock-6',
-        candidateName: 'Rahul Verma',
-        companyName: 'Netflix',
-        calendlyLink: 'https://calendly.com/rahul-verma-nflx',
-        owner: 'Shyam',
-        dateAdded: '2026-06-07',
-        priority: 'P4',
-        status: 'Declined',
-        attempts: [
-          { channel: 'Call', timestamp: new Date('2026-06-07T14:00:00').toISOString() }
-        ],
-        interviewDate: '',
-        notes: 'Candidate has accepted another offer elsewhere and declined consent to continue.',
-        history: [
-          { timestamp: new Date('2026-06-07T13:45:00').toISOString(), text: 'Case added. Auto-split assigned to Shyam.' },
-          { timestamp: new Date('2026-06-07T14:00:00').toISOString(), text: 'Logged Attempt 1 (Call). Status synced to Called.' },
-          { timestamp: new Date('2026-06-07T17:30:00').toISOString(), text: 'Marked Declined. Status set to Declined, priority auto-assigned to P4.' }
-        ]
-      }
-    ];
+    // Seeding mock cases from external window.MOCK_CASES if localStorage is empty
+    const MOCK_CASES = window.MOCK_CASES || [];
 
 
     // --- COMPONENTS ---
